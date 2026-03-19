@@ -3,50 +3,158 @@
 <head>
     <title>Online Video Downloader</title>
     <style>
-        body { font-family: Arial; max-width: 600px; margin: 50px auto; }
+        body { font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px; }
         .container { border: 1px solid #ccc; padding: 20px; border-radius: 5px; }
         input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
-        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
-        #status { margin-top: 10px; padding: 10px; }
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; cursor: pointer; margin-top: 10px; border-radius: 3px; font-size: 16px; }
+        button:hover:not(:disabled) { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #status { margin-top: 10px; padding: 10px; border-radius: 3px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        #downloadBtn { display: none; }
+        #downloadBtn.active { display: block; background: #28a745; }
+        #downloadBtn.active:hover { background: #218838; }
+        .progress-info { margin-top: 10px; font-size: 14px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Download Video from ANY Website</h1>
+        <h1>📥 Download Video from ANY Website</h1>
         <form id="downloadForm">
             <input type="text" id="videoURL" placeholder="Paste video URL here" required>
-            <button type="submit">Download Video</button>
+            <button type="submit" id="fetchBtn">Fetch Video</button>
         </form>
+        <button id="downloadBtn" disabled>⬇️ Download to Downloads Folder</button>
         <div id="status"></div>
+        <div id="progressInfo" class="progress-info"></div>
     </div>
     
     <script>
+        const BACKEND_URL = 'http://localhost:5000'; // Change to your backend URL
+        let currentTaskId = null;
+        
         document.getElementById('downloadForm').onsubmit = async (e) => {
             e.preventDefault();
             const url = document.getElementById('videoURL').value;
-            document.getElementById('status').innerText = "Processing...";
+            const statusDiv = document.getElementById('status');
+            const fetchBtn = document.getElementById('fetchBtn');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const progressInfo = document.getElementById('progressInfo');
+            
+            // Disable fetch button during download
+            fetchBtn.disabled = true;
+            downloadBtn.classList.remove('active');
+            
+            statusDiv.className = 'info';
+            statusDiv.innerText = "🔄 Fetching video...";
+            progressInfo.innerText = "";
             
             try {
-                const response = await fetch('YOUR_BACKEND_URL/download', {
+                // Start download
+                const response = await fetch(`${BACKEND_URL}/download`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url })
                 });
                 
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const link = document.createElement('a');
-                    link.href = URL.createObjectURL(blob);
-                    link.download = 'video.mp4';
-                    link.click();
-                    document.getElementById('status').innerText = "Download started!";
-                } else {
-                    document.getElementById('status').innerText = "Download failed. Please check the URL.";
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Download failed');
                 }
+                
+                const data = await response.json();
+                currentTaskId = data.task_id;
+                
+                // Poll for completion
+                pollDownloadStatus(currentTaskId, statusDiv, downloadBtn, progressInfo, fetchBtn);
+                
             } catch (error) {
-                document.getElementById('status').innerText = "Error: " + error.message;
+                statusDiv.className = 'error';
+                statusDiv.innerText = "❌ Error: " + error.message;
+                fetchBtn.disabled = false;
             }
         };
+        
+        async function pollDownloadStatus(taskId, statusDiv, downloadBtn, progressInfo, fetchBtn) {
+            const maxAttempts = 600; // 10 minutes (1 second per poll)
+            let attempts = 0;
+            
+            const interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${BACKEND_URL}/status/${taskId}`);
+                    const status = await response.json();
+                    
+                    if (status.status === 'complete') {
+                        clearInterval(interval);
+                        statusDiv.className = 'success';
+                        statusDiv.innerText = "✅ Video ready to download!";
+                        progressInfo.innerText = `File size: ${formatFileSize(status.file_size)}`;
+                        
+                        // Make download button active and clickable
+                        downloadBtn.classList.add('active');
+                        downloadBtn.disabled = false;
+                        downloadBtn.onclick = () => downloadFile(taskId);
+                        
+                        // Re-enable fetch button for another download
+                        fetchBtn.disabled = false;
+                        
+                    } else if (status.status === 'downloading') {
+                        statusDiv.className = 'info';
+                        statusDiv.innerText = "🔄 Downloading video...";
+                        progressInfo.innerText = `Fetching from server...`;
+                        
+                    } else if (status.status === 'error') {
+                        clearInterval(interval);
+                        statusDiv.className = 'error';
+                        statusDiv.innerText = "❌ Error: " + status.message;
+                        fetchBtn.disabled = false;
+                    }
+                    
+                    attempts++;
+                    if (attempts > maxAttempts) {
+                        clearInterval(interval);
+                        statusDiv.className = 'error';
+                        statusDiv.innerText = "❌ Download timeout (10 minutes exceeded)";
+                        fetchBtn.disabled = false;
+                    }
+                } catch (error) {
+                    clearInterval(interval);
+                    statusDiv.className = 'error';
+                    statusDiv.innerText = "❌ Error checking status: " + error.message;
+                    fetchBtn.disabled = false;
+                }
+            }, 1000);
+        }
+        
+        function downloadFile(taskId) {
+            const downloadBtn = document.getElementById('downloadBtn');
+            downloadBtn.innerText = "⬇️ Downloading...";
+            downloadBtn.disabled = true;
+            
+            // Create a temporary anchor element to trigger download
+            const link = document.createElement('a');
+            link.href = `${BACKEND_URL}/file/${taskId}`;
+            link.setAttribute('download', '');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            // Reset button after a moment
+            setTimeout(() => {
+                downloadBtn.innerText = "⬇️ Download to Downloads Folder";
+                downloadBtn.disabled = false;
+            }, 1000);
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
     </script>
 </body>
 </html>
