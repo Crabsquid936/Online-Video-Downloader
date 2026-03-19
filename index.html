@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Online Video Downloader</title>
+    <style>
+        body { font-family: Arial; max-width: 600px; margin: 50px auto; }
+        .container { border: 1px solid #ccc; padding: 20px; border-radius: 5px; }
+        input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
+        #status { margin-top: 10px; padding: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Download Video from ANY Website</h1>
+        <form id="downloadForm">
+            <input type="text" id="videoURL" placeholder="Paste video URL here" required>
+            <button type="submit">Download Video</button>
+        </form>
+        <div id="status"></div>
+    </div>
+    
+    <script>
+        document.getElementById('downloadForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const url = document.getElementById('videoURL').value;
+            document.getElementById('status').innerText = "Processing...";
+            
+            try {
+                const response = await fetch('YOUR_BACKEND_URL/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = 'video.mp4';
+                    link.click();
+                    document.getElementById('status').innerText = "Download started!";
+                } else {
+                    document.getElementById('status').innerText = "Download failed. Please check the URL.";
+                }
+            } catch (error) {
+                document.getElementById('status').innerText = "Error: " + error.message;
+            }
+        };
+    </script>
+</body>
+</html>
